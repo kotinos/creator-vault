@@ -49,6 +49,16 @@ def analyze_video(video_path):
     try:
         video_file = genai.upload_file(path=video_path)
 
+        # Wait for the file to be processed.
+        print("Processing video...")
+        while video_file.state.name == "PROCESSING":
+            time.sleep(10)
+            video_file = genai.get_file(video_file.name)
+        
+        if video_file.state.name == "FAILED":
+            raise ValueError(f"Video processing failed: {video_file.state.name}")
+
+        print("Video processed successfully.")
         # Step 1: Transcribe the video
         print(f"Transcribing {filename}...")
         model = genai.GenerativeModel(model_name="gemini-2.5-flash")
