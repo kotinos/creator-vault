@@ -122,16 +122,22 @@ def download_and_analyze_reels(links_file):
             video_filename = os.path.basename(filename_process.stdout.strip())
             video_path = os.path.join(REELS_FOLDER, video_filename)
 
-            if os.path.exists(video_path):
-                print(f"Skipping {video_filename}, already exists.")
+            analysis_filename = os.path.splitext(video_filename)[0] + "_analysis.csv"
+            analysis_path = os.path.join(REELS_FOLDER, analysis_filename)
+
+            if os.path.exists(analysis_path):
+                print(f"Skipping {video_filename}, analysis file already exists.")
                 continue
 
-            print(f"Downloading {link}...")
-            subprocess.run(
-                ['yt-dlp', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
-                check=True
-            )
-            print("Download complete.")
+            if not os.path.exists(video_path):
+                print(f"Downloading {link}...")
+                subprocess.run(
+                    ['yt-dlp', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
+                    check=True
+                )
+                print("Download complete.")
+            else:
+                print(f"Video {video_filename} already exists, proceeding to analysis.")
             
             analyze_video(video_path)
 
@@ -144,4 +150,11 @@ def download_and_analyze_reels(links_file):
             print(f"An unexpected error occurred with link {link}: {e}")
 
 if __name__ == "__main__":
-    download_and_analyze_reels("reels_links.txt") 
+    download_and_analyze_reels("reels_links.txt")
+
+
+
+
+
+
+
