@@ -35,7 +35,7 @@ class TestDownloadAndAnalyzeWorkflow(unittest.TestCase):
                 shot_type="B-roll", spoken_text="Hello world",
                 visual_description="A cat playing with yarn.",
                 inferred_purpose="To show cuteness.",
-                effectiveness_rating=5, effectiveness_justification="Very cute."
+                effectiveness_rating="5", effectiveness_justification="Very cute."
             )
         ]
         mock_analyze_video.return_value = mock_analysis_result
@@ -78,9 +78,9 @@ class TestDownloadAndAnalyzeWorkflow(unittest.TestCase):
 
         # 1. Simulate file contents using proper multi-line strings
         links_data = "http://example.com/reel1\\nhttp://example.com/reel2"
-        master_csv_data = \"\"\""video_filename","segment_id","start_time","end_time","shot_type","spoken_text","visual_description","inferred_purpose","effectiveness_rating","effectiveness_justification"
-"reel1.mp4","1","00:00:00.000","00:00:05.000","B-roll","Hello","A scene","To show something",5,"Good"
-\"\"\"
+        master_csv_data = """"video_filename","segment_id","start_time","end_time","shot_type","spoken_text","visual_description","inferred_purpose","effectiveness_rating","effectiveness_justification"
+"reel1.mp4","1","00:00:00.000","00:00:05.000","B-roll","Hello","A scene","To show something","5","Good"
+"""
         
         # 2. Mock `open()` to return the correct file data when called.
         mock_open_file.side_effect = [

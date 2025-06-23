@@ -19,27 +19,33 @@ genai.configure(api_key=api_key)
 REELS_FOLDER = "reels"
 TRANSCRIPTS_FOLDER = "transcripts"
 ANALYSIS_PROMPT = """
+**URGENT: STRICTLY ADHERE TO CSV FORMATTING. EACH ROW MUST HAVE EXACTLY 9 FIELDS.**
+
 Analyze the provided video clip and its accompanying transcript. Your goal is to identify and describe the visual footage shown during specific lines or phrases in the dialogue.
 
-For each distinct visual segment (whether talking head or B-roll), generate a single line of output in CSV format. The CSV line should contain the following fields, in this exact order, separated by commas:
+For each distinct visual segment (whether talking head or B-roll), generate a single line of output in CSV format. The CSV line **MUST** contain the following fields, in this exact order, separated by commas:
 
-**Fields:**
+**Fields (9 total, STRICT ORDER):**
 1.  **Video_Segment_ID:** A unique identifier for the current video segment (e.g., "{video_segment_id}").
 2.  **Visual_Start_Timestamp:** The start time (in HH:MM:SS.ms format) within the video clip where this visual segment begins.
 3.  **Visual_End_Timestamp:** The end time (in HH:MM:SS.ms format) within the video clip where this visual segment ends.
 4.  **Shot_Type:** Categorize the shot as either "Talking Head" or "B-roll".
-5.  **Spoken_Line_Phrase:** The exact text from the transcript that is being spoken when this visual segment is shown. *If the text contains commas, enclose the entire field in double quotes.*
-6.  **Visual_Description:** A detailed visual description of *what* is shown. Be specific about subjects, actions, colors, framing, and any discernible mood or tone. For B-roll, be detailed about the content. For Talking Head, describe the framing, background, and presenter's demeanor if relevant. *If the description contains commas, enclose the entire field in double quotes.*
-7.  **Inferred_Purpose_Connection:** Explain *why* this particular visual was chosen. What is its intended impact? How does it enhance or illustrate the spoken word? For Talking Head, this might be about direct address, personal connection, etc. For B-roll, how it illustrates or supports the narrative. *If the explanation contains commas, enclose the entire field in double quotes.*
-8.  **Effectiveness_Rating:** A numerical rating from 1 to 5 (1 = very ineffective, 5 = highly effective).
-9.  **Effectiveness_Justification:** A brief justification for the effectiveness rating. *If the justification contains commas, enclose the entire field in double quotes.*
+5.  **Spoken_Line_Phrase:** The exact text from the transcript that is being spoken when this visual segment is shown. **CRITICAL: If this text contains commas, double quotes, or newlines, ENCLOSE THE ENTIRE FIELD IN STANDARD STRAIGHT DOUBLE QUOTES (`"`).**
+6.  **Visual_Description:** A detailed visual description of *what* is shown. Be specific about subjects, actions, colors, framing, and any discernible mood or tone. For B-roll, be detailed about the content. For Talking Head, describe the framing, background, and presenter's demeanor if relevant. **CRITICAL: If this description contains commas, double quotes, or newlines, ENCLOSE THE ENTIRE FIELD IN STANDARD STRAIGHT DOUBLE QUOTES (`"`).**
+7.  **Inferred_Purpose_Connection:** Explain *why* this particular visual was chosen. What is its intended impact? How does it enhance or illustrate the spoken word? For Talking Head, this might be about direct address, personal connection, etc. For B-roll, how it illustrates or supports the narrative. **CRITICAL: If this explanation contains commas, double quotes, or newlines, ENCLOSE THE ENTIRE FIELD IN STANDARD STRAIGHT DOUBLE QUOTES (`"`).**
+8.  **Effectiveness_Rating:** A numerical rating from 1 to 5.
+9.  **Effectiveness_Justification:** A brief justification for the effectiveness rating. **CRITICAL: If this justification contains commas, double quotes, or newlines, ENCLOSE THE ENTIRE FIELD IN STANDARD STRAIGHT DOUBLE QUOTES (`"`).**
 
-**Important Notes:**
-* Ensure each visual segment (whether Talking Head or B-roll) corresponds to a single line in the output.
-* If a field naturally contains commas, you **must** enclose that entire field in double quotes (`"`).
-* Do not include a header row in your output. Just provide the data rows.
+**STRICT FORMATTING RULES:**
+* Each visual segment MUST correspond to a single line in the output.
+* **YOU MUST USE STANDARD STRAIGHT DOUBLE QUOTES (`"`) FOR QUOTING. NO CURLY QUOTES.**
+* When a quoted field *itself* contains a literal double quote (`"`), **you MUST escape it by doubling it (`""`).**
+* DO NOT include any header row in your output. Just provide the data rows.
 * Strive for continuous coverage of the video segment; if there are gaps, it's fine, but identify all distinct visual changes.
 * Provide the output directly as CSV lines, one per analysis result.
+
+**Example of a CORRECTLY QUOTED field (note the straight quotes and doubled internal quote):**
+`"The woman said, ""Hello!"" and smiled warmly."`
 """
 
 def create_folders():
@@ -49,12 +55,13 @@ def create_folders():
     if not os.path.exists(TRANSCRIPTS_FOLDER):
         os.makedirs(TRANSCRIPTS_FOLDER)
 
-def analyze_video(video_path):
+def analyze_video(video_path, link=None):
     """
-    Analyzes a single video file and returns a list of analysis results.
+    Analyzes a single video file and returns a list of analysis results and a parse error flag.
     """
     filename = os.path.basename(video_path)
     print(f"Uploading {filename} for analysis...")
+    parse_error = False
     try:
         model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         video_file = genai.upload_file(path=video_path)
@@ -96,47 +103,59 @@ def analyze_video(video_path):
         if not transcript:
             print(f"Could not generate or load transcript for {filename}. Skipping analysis.")
             genai.delete_file(video_file.name)
-            return []
+            return [], False
 
         print(f"Analyzing B-roll for {filename}...")
         
         # Step 2: Analyze the video with the transcript
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
 
-        print("\\n--- Raw Analysis CSV from API ---")
+        print("\n--- Raw Analysis CSV from API ---")
         print(analysis_response.text)
-        print("--- End of Raw Analysis CSV ---\\n")
+        print("--- End of Raw Analysis CSV ---\n")
 
+        # Normalize smart/curly quotes to straight quotes
+        normalized_text = analysis_response.text.replace('"', '"').replace('"', '"')
+        
         analysis_results = []
-        if analysis_response.text:
-            # Use io.StringIO to treat the string response as a file
-            csv_file = io.StringIO(analysis_response.text)
-            csv_reader = csv.reader(csv_file)
-            
-            for row in csv_reader:
-                if len(row) == 9: # Ensure the row has the correct number of columns
+        csv_file = io.StringIO(normalized_text)
+        csv_reader = csv.reader(csv_file, quoting=csv.QUOTE_ALL)
+        for row in csv_reader:
+            # Skip header row if present
+            if row and row[0].lower() in ('segment_id', 'video_segment_id'):
+                continue
+            if len(row) == 9:  # Gemini returns 9 columns, we add video_filename
+                try:
+                    # Map the CSV fields to VisualSegmentAnalysis attributes
+                    # Note: effectiveness_rating is kept as string to match the dataclass
                     analysis = VisualSegmentAnalysis(
-                        video_filename=filename,
-                        segment_id=row[0],
+                        video_filename=filename,  # Add the filename explicitly
+                        segment_id=str(row[0]),  # Ensure segment_id is string
                         start_time=row[1],
                         end_time=row[2],
                         shot_type=row[3],
                         spoken_text=row[4],
                         visual_description=row[5],
                         inferred_purpose=row[6],
-                        effectiveness_rating=int(row[7]),
+                        effectiveness_rating=str(row[7]),  # Keep as string
                         effectiveness_justification=row[8]
                     )
                     analysis_results.append(analysis)
-            
+                except Exception as e:
+                    print(f"[PARSE ERROR] Could not parse row: {row}")
+                    print(f"[PARSE ERROR] Exception details: {str(e)}")
+                    parse_error = True
+            else:
+                print(f"[PARSE ERROR] Malformed row (expected 9 columns, got {len(row)}): {row}")
+                parse_error = True
         print(f"Deleting {filename} from the File API...")
         genai.delete_file(video_file.name)
         print(f"Deleted {filename}.")
-        return analysis_results
+        return analysis_results, parse_error
 
     except Exception as e:
         print(f"An error occurred during analysis of {filename}: {e}")
-        return []
+        return [], True
 
 
 def download_and_analyze_reels(links_file):
@@ -145,6 +164,7 @@ def download_and_analyze_reels(links_file):
     master_csv_path = "master_analysis.csv"
     all_analysis_results = []
     analyzed_videos = set()
+    failed_links = []  # Track failed URLs
 
     # Load existing analysis results if the master file exists
     if os.path.exists(master_csv_path):
@@ -155,10 +175,9 @@ def download_and_analyze_reels(links_file):
                 try:
                     all_analysis_results.append(VisualSegmentAnalysis(**row))
                     analyzed_videos.add(row['video_filename'])
-                except (TypeError, KeyError) as e:
+                except (TypeError, KeyError, ValueError) as e:
                     print(f"Skipping malformed row in master CSV: {row}. Error: {e}")
         print(f"Loaded {len(all_analysis_results)} existing analysis results.")
-
 
     if not os.path.exists(links_file):
         print(f"Error: {links_file} not found.")
@@ -214,22 +233,40 @@ def download_and_analyze_reels(links_file):
             else:
                 print(f"Video {video_filename} already exists, proceeding to analysis.")
             
-            new_results = analyze_video(video_path)
+            new_results, parse_error = analyze_video(video_path, link)
             if new_results:
-                print("\\n--- New Analysis Results ---")
+                print("\n--- New Analysis Results ---")
                 for result in new_results:
                     print(result)
-                print("--- End of New Analysis ---\\n")
-                all_analysis_results.extend(new_results)
-                # Write the master CSV after each successful analysis to save progress
-                write_analysis_to_csv(all_analysis_results, master_csv_path)
+                print("--- End of New Analysis ---\n")
+                
+                if parse_error:
+                    print(f"WARNING: Skipping CSV write for {video_filename} due to parse errors")
+                    failed_links.append(link)
+                else:
+                    all_analysis_results.extend(new_results)
+                    print(f"DEBUG: About to append {len(new_results)} results for {video_filename} to CSV")
+                    write_analysis_to_csv(new_results, master_csv_path)
+            elif parse_error:
+                failed_links.append(link)
 
         except subprocess.CalledProcessError as e:
             print(f"Failed to process {link}. Error: {e}")
+            failed_links.append(link)
         except (subprocess.TimeoutExpired, TimeoutError) as e:
             print(f"Timeout occurred while processing {link}: {e}. Skipping.")
+            failed_links.append(link)
         except Exception as e:
             print(f"An unexpected error occurred with link {link}: {e}")
+            failed_links.append(link)
+
+    # After processing all links, print failed URLs
+    if failed_links:
+        print("\nThe following URLs failed during analysis:")
+        for url in failed_links:
+            print(url)
+    else:
+        print("\nAll videos processed successfully!")
 
 if __name__ == "__main__":
     download_and_analyze_reels("reels_links.txt")

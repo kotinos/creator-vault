@@ -1,5 +1,6 @@
 import csv
 from dataclasses import dataclass, asdict
+import os
 
 @dataclass
 class VisualSegmentAnalysis:
@@ -12,24 +13,30 @@ class VisualSegmentAnalysis:
     spoken_text: str
     visual_description: str
     inferred_purpose: str
-    effectiveness_rating: int
+    effectiveness_rating: str
     effectiveness_justification: str
 
 def write_analysis_to_csv(analysis_results: list[VisualSegmentAnalysis], csv_path: str):
-    """Writes a list of VisualSegmentAnalysis objects to a CSV file."""
+    """Appends a list of VisualSegmentAnalysis objects to a CSV file."""
     if not analysis_results:
         print("No analysis results to write.")
         return
 
     fieldnames = list(asdict(analysis_results[0]).keys())
-    
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for result in analysis_results:
-            writer.writerow(asdict(result))
-
-    print(f"Analysis results saved to {csv_path}")
+    file_exists = os.path.exists(csv_path)
+    write_header = not file_exists or os.stat(csv_path).st_size == 0
+    print(f"[CSV] Appending {len(analysis_results)} results to {csv_path}")
+    try:
+        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+            if write_header:
+                writer.writeheader()
+            for result in analysis_results:
+                row = asdict(result)
+                writer.writerow(row)
+        print(f"Analysis results appended to {csv_path}")
+    except Exception as e:
+        print(f"[CSV] Exception while appending to {csv_path}: {e}")
 
 if __name__ == '__main__':
     # Example usage:
