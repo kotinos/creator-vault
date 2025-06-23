@@ -12,6 +12,7 @@ load_dotenv()
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 REELS_FOLDER = "reels"
+TRANSCRIPTS_FOLDER = "transcripts"
 ANALYSIS_PROMPT = """
 Analyze the provided video clip and its accompanying transcript. Your goal is to identify and describe the visual footage shown during specific lines or phrases in the dialogue.
 
@@ -36,9 +37,12 @@ For each distinct visual segment (whether talking head or B-roll), generate a si
 * Provide the output directly as CSV lines, one per analysis result.
 """
 
-def create_reels_folder():
+def create_folders():
+    """Creates the reels and transcripts folders if they don't exist."""
     if not os.path.exists(REELS_FOLDER):
         os.makedirs(REELS_FOLDER)
+    if not os.path.exists(TRANSCRIPTS_FOLDER):
+        os.makedirs(TRANSCRIPTS_FOLDER)
 
 def analyze_video(video_path):
     """
@@ -59,18 +63,34 @@ def analyze_video(video_path):
             raise ValueError(f"Video processing failed: {video_file.state.name}")
 
         print("Video processed successfully.")
-        # Step 1: Transcribe the video
-        print(f"Transcribing {filename}...")
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
-        transcript_response = model.generate_content(["Transcribe this video.", video_file])
-        transcript = transcript_response.text if transcript_response.text else ""
+        
+        # Step 1: Get or generate the transcript
+        transcript_filename = os.path.splitext(filename)[0] + "_transcript.txt"
+        transcript_path = os.path.join(TRANSCRIPTS_FOLDER, transcript_filename)
+        transcript = ""
+
+        if os.path.exists(transcript_path):
+            print(f"Loading existing transcript for {filename}...")
+            with open(transcript_path, "r", encoding='utf-8') as f:
+                transcript = f.read()
+        else:
+            print(f"Transcribing {filename}...")
+            model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+            transcript_response = model.generate_content(["Transcribe this video.", video_file])
+            transcript = transcript_response.text if transcript_response.text else ""
+
+            if transcript:
+                # Save the full transcript
+                with open(transcript_path, "w", encoding='utf-8') as f:
+                    f.write(transcript)
+                print(f"Full transcript saved to {transcript_path}")
 
         if not transcript:
-            print(f"Could not generate transcript for {filename}. Skipping analysis.")
+            print(f"Could not generate or load transcript for {filename}. Skipping analysis.")
             genai.delete_file(video_file.name)
             return
 
-        print(f"Transcription complete. Analyzing B-roll for {filename}...")
+        print(f"Analyzing B-roll for {filename}...")
         
         # Step 2: Analyze the video with the transcript
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
@@ -113,7 +133,7 @@ def analyze_video(video_path):
 
 
 def download_and_analyze_reels(links_file):
-    create_reels_folder()
+    create_folders()
 
     if not os.path.exists(links_file):
         print(f"Error: {links_file} not found.")
