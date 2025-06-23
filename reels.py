@@ -171,7 +171,7 @@ def download_and_analyze_reels(links_file):
     for link in links:
         try:
             # Use a more robust filename based on creator and video ID
-            output_template = f'{REELS_FOLDER}/%(creator)s - %(id)s.%(ext)s'
+            output_template = f'{REELS_FOLDER}/Video by %(creator)s [%(id)s].%(ext)s'
             
             # Get the filename yt-dlp would use
             filename_process = subprocess.run(
