@@ -164,7 +164,18 @@ def download_and_analyze_reels(links_file):
 
     for link in links:
         try:
-            # Enforce rate limit
+            # Get the filename yt-dlp would use
+            filename_process = subprocess.run(
+                ['yt-dlp', '--get-filename', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
+                capture_output=True, text=True, check=True
+            )
+            video_filename = os.path.basename(filename_process.stdout.strip())
+            
+            if video_filename in analyzed_videos:
+                print(f"Skipping {video_filename}, already analyzed in master CSV.")
+                continue
+
+            # Enforce rate limit before processing the video
             current_time = time.time()
             while len(request_timestamps) >= requests_per_minute:
                 time_since_oldest_request = current_time - request_timestamps[0]
@@ -177,17 +188,6 @@ def download_and_analyze_reels(links_file):
                     current_time = time.time()  # Update current time after waiting
             
             request_timestamps.append(time.time())
-
-            # Get the filename yt-dlp would use
-            filename_process = subprocess.run(
-                ['yt-dlp', '--get-filename', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
-                capture_output=True, text=True, check=True
-            )
-            video_filename = os.path.basename(filename_process.stdout.strip())
-            
-            if video_filename in analyzed_videos:
-                print(f"Skipping {video_filename}, already analyzed in master CSV.")
-                continue
 
             video_path = os.path.join(REELS_FOLDER, video_filename)
 
