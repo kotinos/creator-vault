@@ -52,6 +52,7 @@ def analyze_video(video_path):
     filename = os.path.basename(video_path)
     print(f"Uploading {filename} for analysis...")
     try:
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         video_file = genai.upload_file(path=video_path)
 
         # Wait for the file to be processed.
@@ -76,7 +77,6 @@ def analyze_video(video_path):
                 transcript = f.read()
         else:
             print(f"Transcribing {filename}...")
-            model = genai.GenerativeModel(model_name="gemini-1.5-flash")
             transcript_response = model.generate_content(["Transcribe this video.", video_file])
             transcript = transcript_response.text if transcript_response.text else ""
 
@@ -94,7 +94,6 @@ def analyze_video(video_path):
         print(f"Analyzing B-roll for {filename}...")
         
         # Step 2: Analyze the video with the transcript
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
 
         analysis_results = []
