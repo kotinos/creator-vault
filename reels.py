@@ -176,9 +176,12 @@ def download_and_analyze_reels(links_file):
 
     for link in links:
         try:
+            # Use a more robust filename based on creator and video ID
+            output_template = f'{REELS_FOLDER}/%(creator)s - %(id)s.%(ext)s'
+            
             # Get the filename yt-dlp would use
             filename_process = subprocess.run(
-                ['yt-dlp', '--get-filename', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
+                ['yt-dlp', '--get-filename', '-o', output_template, link],
                 capture_output=True, text=True, check=True, timeout=60 # 60-second timeout
             )
             video_filename = os.path.basename(filename_process.stdout.strip())
@@ -206,7 +209,7 @@ def download_and_analyze_reels(links_file):
             if not os.path.exists(video_path):
                 print(f"Downloading {link}...")
                 subprocess.run(
-                    ['yt-dlp', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
+                    ['yt-dlp', '-o', output_template, link],
                     check=True, timeout=300 # 5-minute timeout for download
                 )
                 print("Download complete.")
