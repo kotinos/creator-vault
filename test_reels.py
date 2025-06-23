@@ -1,53 +1,71 @@
 import unittest
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import patch, mock_open, MagicMock, call
 import os
-from reels import transcribe_videos_in_directory
+import io
+from reels import download_and_analyze_reels, analyze_video, VisualSegmentAnalysis
+from reels_analyzer import write_analysis_to_csv
 
-class TestVideoTranscriber(unittest.TestCase):
+class TestDownloadAndAnalyzeWorkflow(unittest.TestCase):
 
-    @patch('reels.genai.delete_file')
-    @patch('reels.genai.upload_file')
-    @patch('reels.genai.GenerativeModel')
-    @patch('reels.os.path.isdir')
-    @patch('reels.os.listdir')
-    def test_transcribe_videos_in_directory(self, mock_listdir, mock_isdir, mock_gen_model, mock_upload_file, mock_delete_file):
-        # Arrange
-        test_directory = "test_videos"
-        mock_isdir.return_value = True
-        mock_listdir.return_value = ["video1.mp4", "video2.mp4", "not_a_video.txt"]
-
-        # Mock the Gemini API responses
-        mock_uploaded_file = MagicMock()
-        mock_uploaded_file.name = "uploaded_file_name"
-        mock_upload_file.return_value = mock_uploaded_file
-
-        mock_model_instance = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "This is a transcript."
-        mock_model_instance.generate_content.return_value = mock_response
-        mock_gen_model.return_value = mock_model_instance
-
-        # Act
-        with patch("builtins.open", mock_open()) as mock_file:
-            transcribe_videos_in_directory(test_directory)
-
-        # Assert
-        self.assertEqual(mock_upload_file.call_count, 2)
-        mock_upload_file.assert_any_call(path=os.path.join(test_directory, "video1.mp4"))
-        mock_upload_file.assert_any_call(path=os.path.join(test_directory, "video2.mp4"))
+    @patch('reels.os.makedirs')
+    @patch('reels.write_analysis_to_csv')
+    @patch('reels.analyze_video')
+    @patch('reels.subprocess.run')
+    @patch('reels.os.path.exists')
+    @patch('builtins.open', new_callable=mock_open, read_data="http://example.com/reel1")
+    def test_full_workflow(self, mock_open_file, mock_exists, mock_subprocess, mock_analyze_video, mock_write_csv, mock_makedirs):
+        # --- ARRANGE ---
         
-        self.assertEqual(mock_gen_model.call_count, 2)
-        self.assertEqual(mock_model_instance.generate_content.call_count, 2)
+        # 1. Simulate the results for all os.path.exists checks in order of execution
+        # - reels folder: False (in create_folders)
+        # - transcripts folder: False (in create_folders)
+        # - master_analysis.csv: False (doesn't exist)
+        # - dummy_links.txt: True (so the function doesn't exit early)
+        # - the video file: False (needs to be downloaded)
+        mock_exists.side_effect = [False, False, False, True, False] 
 
-        self.assertEqual(mock_file.call_count, 2)
-        mock_file.assert_any_call(os.path.join(test_directory, "video1.txt"), "w")
-        mock_file.assert_any_call(os.path.join(test_directory, "video2.txt"), "w")
+        # 2. Mock the subprocess call that gets the video filename
+        mock_subprocess.return_value.stdout = "Test-Video.mp4"
+
+        # 3. Mock the analysis result that analyze_video will return
+        mock_analysis_result = [
+            VisualSegmentAnalysis(
+                video_filename="Test-Video.mp4",
+                segment_id="1", start_time="00:00:00.000", end_time="00:00:05.000",
+                shot_type="B-roll", spoken_text="Hello world",
+                visual_description="A cat playing with yarn.",
+                inferred_purpose="To show cuteness.",
+                effectiveness_rating=5, effectiveness_justification="Very cute."
+            )
+        ]
+        mock_analyze_video.return_value = mock_analysis_result
+
+        # --- ACT ---
+        download_and_analyze_reels("dummy_links.txt")
+
+        # --- ASSERT ---
         
-        handle = mock_file()
-        handle.write.assert_any_call("This is a transcript.")
+        # 1. Check if it tried to get the video filename
+        mock_subprocess.assert_any_call(
+            ['yt-dlp', '--get-filename', '-o', 'reels/%(title)s.%(ext)s', "http://example.com/reel1"],
+            capture_output=True, text=True, check=True
+        )
 
-        self.assertEqual(mock_delete_file.call_count, 2)
-        mock_delete_file.assert_any_call("uploaded_file_name")
+        # 2. Check if it tried to download the video since it didn't exist
+        mock_subprocess.assert_any_call(
+            ['yt-dlp', '-o', 'reels/%(title)s.%(ext)s', "http://example.com/reel1"],
+            check=True
+        )
+
+        # 3. Check if it called the analysis function for the video
+        mock_analyze_video.assert_called_once_with('reels/Test-Video.mp4')
+
+        # 4. Check if it tried to write the final results to the master CSV
+        # The first argument to the first call of write_analysis_to_csv
+        mock_write_csv.assert_called_once()
+        self.assertEqual(len(mock_write_csv.call_args[0][0]), 1) # The list of results
+        self.assertEqual(mock_write_csv.call_args[0][0][0].video_filename, "Test-Video.mp4")
+        self.assertEqual(mock_write_csv.call_args[0][1], "master_analysis.csv") # The path
 
 if __name__ == '__main__':
     unittest.main() 
