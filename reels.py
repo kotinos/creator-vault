@@ -116,37 +116,124 @@ def analyze_video(video_path, link=None):
 
         # Normalize smart/curly quotes to straight quotes
         normalized_text = analysis_response.text.replace('"', '"').replace('"', '"')
-        
+
+        def extract_fields(line):
+            """
+            Extracts fields from a line using pattern matching and known structure.
+            Returns a list of 9 fields if successful, or None if parsing fails.
+            """
+            try:
+                # Split the line but preserve quoted content
+                parts = []
+                current = []
+                in_quotes = False
+                
+                # First pass: split while respecting quotes
+                for char in line:
+                    if char == '"':
+                        in_quotes = not in_quotes
+                    if char == ',' and not in_quotes:
+                        parts.append(''.join(current))
+                        current = []
+                    else:
+                        current.append(char)
+                parts.append(''.join(current))
+                
+                # Clean up the parts
+                parts = [p.strip() for p in parts]
+                
+                # Extract fields based on known patterns
+                segment_id = parts[0].strip('"')  # Usually VS### or a number
+                
+                # Find timestamps (in format HH:MM:SS.ms or MM:SS.ms)
+                timestamps = [p for p in parts[1:4] if ':' in p][:2]
+                if len(timestamps) != 2:
+                    return None
+                start_time, end_time = timestamps
+                
+                # Find shot type (either "Talking Head" or "B-roll")
+                shot_type = next((p for p in parts if p.strip('"') in ["Talking Head", "B-roll"]), None)
+                if not shot_type:
+                    return None
+                
+                # Find effectiveness rating (a number 1-5)
+                rating = next((p for p in parts if p.strip('"') in ['1', '2', '3', '4', '5']), None)
+                if not rating:
+                    return None
+                
+                # The spoken text is usually the first long text after shot type
+                shot_type_index = next(i for i, p in enumerate(parts) if p.strip('"') in ["Talking Head", "B-roll"])
+                spoken_text = parts[shot_type_index + 1]
+                
+                # Visual description is usually the next substantial text
+                visual_desc_start = shot_type_index + 2
+                visual_desc_parts = []
+                for p in parts[visual_desc_start:]:
+                    if p.strip('"') in ['1', '2', '3', '4', '5']:
+                        break
+                    visual_desc_parts.append(p)
+                visual_description = ' '.join(visual_desc_parts[:2])  # Take first two substantial parts
+                
+                # Inferred purpose is usually before the rating
+                rating_index = next(i for i, p in enumerate(parts) if p.strip('"') in ['1', '2', '3', '4', '5'])
+                inferred_purpose = ' '.join(parts[rating_index-1:rating_index]).strip()
+                
+                # Effectiveness justification is everything after the rating
+                justification = ' '.join(parts[rating_index+1:]).strip()
+                
+                return [
+                    segment_id,
+                    start_time,
+                    end_time,
+                    shot_type.strip('"'),
+                    spoken_text.strip('"'),
+                    visual_description.strip('"'),
+                    inferred_purpose.strip('"'),
+                    rating.strip('"'),
+                    justification.strip('"')
+                ]
+            except Exception as e:
+                print(f"[DEBUG] Failed to extract fields: {str(e)}")
+                return None
+
         analysis_results = []
-        csv_file = io.StringIO(normalized_text)
-        csv_reader = csv.reader(csv_file, quoting=csv.QUOTE_ALL)
-        for row in csv_reader:
-            # Skip header row if present
-            if row and row[0].lower() in ('segment_id', 'video_segment_id'):
+        for line in normalized_text.strip().split('\n'):
+            if not line.strip():  # Skip empty lines
                 continue
-            if len(row) == 9:  # Gemini returns 9 columns, we add video_filename
-                try:
-                    # Map the CSV fields to VisualSegmentAnalysis attributes
-                    # Note: effectiveness_rating is kept as string to match the dataclass
-                    analysis = VisualSegmentAnalysis(
-                        video_filename=filename,  # Add the filename explicitly
-                        segment_id=str(row[0]),  # Ensure segment_id is string
-                        start_time=row[1],
-                        end_time=row[2],
-                        shot_type=row[3],
-                        spoken_text=row[4],
-                        visual_description=row[5],
-                        inferred_purpose=row[6],
-                        effectiveness_rating=str(row[7]),  # Keep as string
-                        effectiveness_justification=row[8]
-                    )
-                    analysis_results.append(analysis)
-                except Exception as e:
-                    print(f"[PARSE ERROR] Could not parse row: {row}")
-                    print(f"[PARSE ERROR] Exception details: {str(e)}")
+            # Skip header row if present
+            if any(header in line.lower() for header in ('segment_id', 'video_segment_id')):
+                continue
+                
+            try:
+                # Extract fields using pattern matching
+                fields = extract_fields(line)
+                
+                if fields and len(fields) == 9:
+                    try:
+                        # Map the fields to VisualSegmentAnalysis attributes
+                        analysis = VisualSegmentAnalysis(
+                            video_filename=filename,
+                            segment_id=str(fields[0]),
+                            start_time=fields[1],
+                            end_time=fields[2],
+                            shot_type=fields[3],
+                            spoken_text=fields[4],
+                            visual_description=fields[5],
+                            inferred_purpose=fields[6],
+                            effectiveness_rating=str(fields[7]),
+                            effectiveness_justification=fields[8]
+                        )
+                        analysis_results.append(analysis)
+                    except Exception as e:
+                        print(f"[PARSE ERROR] Could not create VisualSegmentAnalysis from fields: {fields}")
+                        print(f"[PARSE ERROR] Exception details: {str(e)}")
+                        parse_error = True
+                else:
+                    print(f"[PARSE ERROR] Could not extract valid fields from line: {line}")
                     parse_error = True
-            else:
-                print(f"[PARSE ERROR] Malformed row (expected 9 columns, got {len(row)}): {row}")
+            except Exception as e:
+                print(f"[PARSE ERROR] Failed to process line: {line}")
+                print(f"[PARSE ERROR] Exception details: {str(e)}")
                 parse_error = True
         print(f"Deleting {filename} from the File API...")
         genai.delete_file(video_file.name)
