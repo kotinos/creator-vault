@@ -4,23 +4,17 @@ import subprocess
 import csv
 import io
 import google.generativeai as genai
-from google.api_core import client_options
 from dotenv import load_dotenv
 from collections import deque
 from reels_analyzer import VisualSegmentAnalysis, write_analysis_to_csv
 
 load_dotenv()
 
-# Configure the Gemini client with a timeout
+# Configure the Gemini client
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found in environment variables.")
-
-# Set a 60-second timeout for all API requests
-client_options = client_options.ClientOptions(
-    api_endpoint="generativelanguage.googleapis.com",
-)
-genai.configure(api_key=api_key, client_options={"api_key": api_key}, transport="rest")
+genai.configure(api_key=api_key)
 
 REELS_FOLDER = "reels"
 TRANSCRIPTS_FOLDER = "transcripts"
