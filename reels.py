@@ -103,6 +103,10 @@ def analyze_video(video_path):
         # Step 2: Analyze the video with the transcript
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
 
+        print("\\n--- Raw Analysis CSV from API ---")
+        print(analysis_response.text)
+        print("--- End of Raw Analysis CSV ---\\n")
+
         analysis_results = []
         if analysis_response.text:
             # Use io.StringIO to treat the string response as a file
@@ -212,6 +216,10 @@ def download_and_analyze_reels(links_file):
             
             new_results = analyze_video(video_path)
             if new_results:
+                print("\\n--- New Analysis Results ---")
+                for result in new_results:
+                    print(result)
+                print("--- End of New Analysis ---\\n")
                 all_analysis_results.extend(new_results)
                 # Write the master CSV after each successful analysis to save progress
                 write_analysis_to_csv(all_analysis_results, master_csv_path)

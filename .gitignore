@@ -19,4 +19,9 @@ test_reels_links.txt
 *.avi
 
 # Secrets
-.env 
+.env
+
+# Generated content
+reels/
+transcripts/
+master_analysis.csv 
