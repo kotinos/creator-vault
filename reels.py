@@ -47,7 +47,7 @@ def create_folders():
 
 def analyze_video(video_path):
     """
-    Analyzes a single video file by transcribing and then performing B-roll analysis.
+    Analyzes a single video file and returns a list of analysis results.
     """
     filename = os.path.basename(video_path)
     print(f"Uploading {filename} for analysis...")
@@ -89,15 +89,16 @@ def analyze_video(video_path):
         if not transcript:
             print(f"Could not generate or load transcript for {filename}. Skipping analysis.")
             genai.delete_file(video_file.name)
-            return
+            return []
 
         print(f"Analyzing B-roll for {filename}...")
         
         # Step 2: Analyze the video with the transcript
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
 
+        analysis_results = []
         if analysis_response.text:
-            analysis_results = []
             # Use io.StringIO to treat the string response as a file
             csv_file = io.StringIO(analysis_response.text)
             csv_reader = csv.reader(csv_file)
@@ -118,23 +119,36 @@ def analyze_video(video_path):
                     )
                     analysis_results.append(analysis)
             
-            if analysis_results:
-                csv_filename = os.path.splitext(filename)[0] + "_analysis.csv"
-                csv_path = os.path.join(REELS_FOLDER, csv_filename)
-                write_analysis_to_csv(analysis_results, csv_path)
-        else:
-            print(f"Could not generate analysis for {filename}")
-
         print(f"Deleting {filename} from the File API...")
         genai.delete_file(video_file.name)
         print(f"Deleted {filename}.")
+        return analysis_results
 
     except Exception as e:
         print(f"An error occurred during analysis of {filename}: {e}")
+        return []
 
 
 def download_and_analyze_reels(links_file):
     create_folders()
+
+    master_csv_path = "master_analysis.csv"
+    all_analysis_results = []
+    analyzed_videos = set()
+
+    # Load existing analysis results if the master file exists
+    if os.path.exists(master_csv_path):
+        with open(master_csv_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Recreate the VisualSegmentAnalysis object from the row
+                try:
+                    all_analysis_results.append(VisualSegmentAnalysis(**row))
+                    analyzed_videos.add(row['video_filename'])
+                except (TypeError, KeyError) as e:
+                    print(f"Skipping malformed row in master CSV: {row}. Error: {e}")
+        print(f"Loaded {len(all_analysis_results)} existing analysis results.")
+
 
     if not os.path.exists(links_file):
         print(f"Error: {links_file} not found.")
@@ -170,14 +184,12 @@ def download_and_analyze_reels(links_file):
                 capture_output=True, text=True, check=True
             )
             video_filename = os.path.basename(filename_process.stdout.strip())
-            video_path = os.path.join(REELS_FOLDER, video_filename)
-
-            analysis_filename = os.path.splitext(video_filename)[0] + "_analysis.csv"
-            analysis_path = os.path.join(REELS_FOLDER, analysis_filename)
-
-            if os.path.exists(analysis_path):
-                print(f"Skipping {video_filename}, analysis file already exists.")
+            
+            if video_filename in analyzed_videos:
+                print(f"Skipping {video_filename}, already analyzed in master CSV.")
                 continue
+
+            video_path = os.path.join(REELS_FOLDER, video_filename)
 
             if not os.path.exists(video_path):
                 print(f"Downloading {link}...")
@@ -189,7 +201,11 @@ def download_and_analyze_reels(links_file):
             else:
                 print(f"Video {video_filename} already exists, proceeding to analysis.")
             
-            analyze_video(video_path)
+            new_results = analyze_video(video_path)
+            if new_results:
+                all_analysis_results.extend(new_results)
+                # Write the master CSV after each successful analysis to save progress
+                write_analysis_to_csv(all_analysis_results, master_csv_path)
 
         except subprocess.CalledProcessError as e:
             print(f"Failed to process {link}. Error: {e}")
