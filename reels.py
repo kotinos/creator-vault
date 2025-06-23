@@ -4,13 +4,23 @@ import subprocess
 import csv
 import io
 import google.generativeai as genai
+from google.api_core import client_options
 from dotenv import load_dotenv
 from collections import deque
 from reels_analyzer import VisualSegmentAnalysis, write_analysis_to_csv
 
 load_dotenv()
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+# Configure the Gemini client with a timeout
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in environment variables.")
+
+# Set a 60-second timeout for all API requests
+client_options = client_options.ClientOptions(
+    api_endpoint="generativelanguage.googleapis.com",
+)
+genai.configure(api_key=api_key, client_options={"api_key": api_key}, transport="rest")
 
 REELS_FOLDER = "reels"
 TRANSCRIPTS_FOLDER = "transcripts"
@@ -55,9 +65,12 @@ def analyze_video(video_path):
         model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         video_file = genai.upload_file(path=video_path)
 
-        # Wait for the file to be processed.
+        # Wait for the file to be processed, with a timeout.
         print("Processing video...")
+        processing_start_time = time.time()
         while video_file.state.name == "PROCESSING":
+            if time.time() - processing_start_time > 300: # 5-minute timeout
+                raise TimeoutError("Video processing timed out after 5 minutes.")
             time.sleep(10)
             video_file = genai.get_file(video_file.name)
         
@@ -166,7 +179,7 @@ def download_and_analyze_reels(links_file):
             # Get the filename yt-dlp would use
             filename_process = subprocess.run(
                 ['yt-dlp', '--get-filename', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, check=True, timeout=60 # 60-second timeout
             )
             video_filename = os.path.basename(filename_process.stdout.strip())
             
@@ -194,7 +207,7 @@ def download_and_analyze_reels(links_file):
                 print(f"Downloading {link}...")
                 subprocess.run(
                     ['yt-dlp', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
-                    check=True
+                    check=True, timeout=300 # 5-minute timeout for download
                 )
                 print("Download complete.")
             else:
@@ -208,6 +221,8 @@ def download_and_analyze_reels(links_file):
 
         except subprocess.CalledProcessError as e:
             print(f"Failed to process {link}. Error: {e}")
+        except (subprocess.TimeoutExpired, TimeoutError) as e:
+            print(f"Timeout occurred while processing {link}: {e}. Skipping.")
         except Exception as e:
             print(f"An unexpected error occurred with link {link}: {e}")
 

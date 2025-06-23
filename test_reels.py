@@ -67,5 +67,46 @@ class TestDownloadAndAnalyzeWorkflow(unittest.TestCase):
         self.assertEqual(mock_write_csv.call_args[0][0][0].video_filename, "Test-Video.mp4")
         self.assertEqual(mock_write_csv.call_args[0][1], "master_analysis.csv") # The path
 
+    @patch('reels.os.makedirs')
+    @patch('reels.write_analysis_to_csv')
+    @patch('reels.analyze_video')
+    @patch('reels.subprocess.run')
+    @patch('reels.os.path.exists')
+    @patch('builtins.open')
+    def test_iterates_through_multiple_links_and_skips_analyzed(self, mock_open_file, mock_exists, mock_subprocess, mock_analyze_video, mock_write_csv, mock_makedirs):
+        # --- ARRANGE ---
+
+        # 1. Simulate file contents using proper multi-line strings
+        links_data = "http://example.com/reel1\\nhttp://example.com/reel2"
+        master_csv_data = \"\"\""video_filename","segment_id","start_time","end_time","shot_type","spoken_text","visual_description","inferred_purpose","effectiveness_rating","effectiveness_justification"
+"reel1.mp4","1","00:00:00.000","00:00:05.000","B-roll","Hello","A scene","To show something",5,"Good"
+\"\"\"
+        
+        # 2. Mock `open()` to return the correct file data when called.
+        mock_open_file.side_effect = [
+            mock_open(read_data=master_csv_data).return_value,
+            mock_open(read_data=links_data).return_value
+        ]
+
+        # 3. Mock `os.path.exists()` for the sequence of checks in the script.
+        mock_exists.side_effect = [True, True, True, True, False]
+
+        # 4. Mock the sequence of `subprocess.run` calls
+        mock_subprocess.side_effect = [
+            MagicMock(stdout="reel1.mp4"),
+            MagicMock(stdout="reel2.mp4"),
+            MagicMock()
+        ]
+        
+        # --- ACT ---
+        download_and_analyze_reels("dummy_links.txt")
+
+        # --- ASSERT ---
+        self.assertEqual(mock_subprocess.call_count, 3)
+        mock_subprocess.assert_any_call(['yt-dlp', '--get-filename', '-o', 'reels/%(title)s.%(ext)s', 'http://example.com/reel1'], capture_output=True, text=True, check=True)
+        mock_subprocess.assert_any_call(['yt-dlp', '--get-filename', '-o', 'reels/%(title)s.%(ext)s', 'http://example.com/reel2'], capture_output=True, text=True, check=True)
+        mock_analyze_video.assert_called_once_with('reels/reel2.mp4')
+        mock_write_csv.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main() 
