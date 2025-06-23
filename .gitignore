@@ -16,4 +16,7 @@ test_reels_links.txt
 *.mkv
 *.webm
 *.mov
-*.avi 
+*.avi
+
+# Secrets
+.env 

@@ -1,39 +1,53 @@
 import unittest
-from unittest.mock import patch, call
+from unittest.mock import patch, mock_open, MagicMock
 import os
-from reels import download_reels
+from reels import transcribe_videos_in_directory
 
-class TestReelsDownloader(unittest.TestCase):
+class TestVideoTranscriber(unittest.TestCase):
 
-    def setUp(self):
-        self.links_file = "test_reels_links.txt"
-        with open(self.links_file, "w") as f:
-            f.write("https://www.instagram.com/reel/C1ABCDEFG\n")
-            f.write("https://www.instagram.com/reel/C2HIJKLMN\n")
+    @patch('reels.genai.delete_file')
+    @patch('reels.genai.upload_file')
+    @patch('reels.genai.GenerativeModel')
+    @patch('reels.os.path.isdir')
+    @patch('reels.os.listdir')
+    def test_transcribe_videos_in_directory(self, mock_listdir, mock_isdir, mock_gen_model, mock_upload_file, mock_delete_file):
+        # Arrange
+        test_directory = "test_videos"
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ["video1.mp4", "video2.mp4", "not_a_video.txt"]
 
-    def tearDown(self):
-        os.remove(self.links_file)
+        # Mock the Gemini API responses
+        mock_uploaded_file = MagicMock()
+        mock_uploaded_file.name = "uploaded_file_name"
+        mock_upload_file.return_value = mock_uploaded_file
 
-    @patch('reels.os.system')
-    @patch('reels.time.sleep')
-    def test_download_reels(self, mock_sleep, mock_system):
-        download_reels(self.links_file)
+        mock_model_instance = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "This is a transcript."
+        mock_model_instance.generate_content.return_value = mock_response
+        mock_gen_model.return_value = mock_model_instance
 
-        expected_system_calls = [
-            call("yt-dlp https://www.instagram.com/reel/C1ABCDEFG"),
-            call("yt-dlp https://www.instagram.com/reel/C2HIJKLMN")
-        ]
-        mock_system.assert_has_calls(expected_system_calls, any_order=False)
+        # Act
+        with patch("builtins.open", mock_open()) as mock_file:
+            transcribe_videos_in_directory(test_directory)
 
-        expected_sleep_calls = [
-            call(10),
-            call(10)
-        ]
-        mock_sleep.assert_has_calls(expected_sleep_calls)
+        # Assert
+        self.assertEqual(mock_upload_file.call_count, 2)
+        mock_upload_file.assert_any_call(path=os.path.join(test_directory, "video1.mp4"))
+        mock_upload_file.assert_any_call(path=os.path.join(test_directory, "video2.mp4"))
         
-        # Check that os.system and time.sleep were called for each link
-        self.assertEqual(mock_system.call_count, 2)
-        self.assertEqual(mock_sleep.call_count, 2)
+        self.assertEqual(mock_gen_model.call_count, 2)
+        self.assertEqual(mock_model_instance.generate_content.call_count, 2)
+
+        self.assertEqual(mock_file.call_count, 2)
+        mock_file.assert_any_call(os.path.join(test_directory, "video1.txt"), "w")
+        mock_file.assert_any_call(os.path.join(test_directory, "video2.txt"), "w")
+        
+        handle = mock_file()
+        handle.write.assert_any_call("This is a transcript.")
+
+        self.assertEqual(mock_delete_file.call_count, 2)
+        mock_delete_file.assert_any_call("uploaded_file_name")
 
 if __name__ == '__main__':
     unittest.main() 

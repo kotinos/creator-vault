@@ -8,6 +8,9 @@ This script helps you download Instagram Reels for analysis. The goal is to use 
 2.  Run the `reels.py` script.
 3.  The script will download each reel one by one, with a 10-second delay between each download.
 
+## B-Roll Analysis for Compelling Storytelling
+**Overall Goal:** To understand the relationship between spoken script and effective B-roll, enabling the generation of impactful B-roll suggestions for various narratives. 
+
 ## Setup
 
 1.  Clone the repository:
