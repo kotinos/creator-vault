@@ -117,84 +117,115 @@ def analyze_video(video_path, link=None):
         # Normalize smart/curly quotes to straight quotes
         normalized_text = analysis_response.text.replace('"', '"').replace('"', '"')
 
-        def extract_fields(line):
-            """
-            Extracts fields from a line using pattern matching and known structure.
-            Returns a list of 9 fields if successful, or None if parsing fails.
-            """
-            try:
-                # Split the line but preserve quoted content
-                parts = []
-                current = []
-                in_quotes = False
-                
-                # First pass: split while respecting quotes
-                for char in line:
-                    if char == '"':
-                        in_quotes = not in_quotes
-                    if char == ',' and not in_quotes:
-                        parts.append(''.join(current))
-                        current = []
-                    else:
-                        current.append(char)
-                parts.append(''.join(current))
-                
-                # Clean up the parts
-                parts = [p.strip() for p in parts]
-                
-                # Extract fields based on known patterns
-                segment_id = parts[0].strip('"')  # Usually VS### or a number
-                
-                # Find timestamps (in format HH:MM:SS.ms or MM:SS.ms)
-                timestamps = [p for p in parts[1:4] if ':' in p][:2]
-                if len(timestamps) != 2:
-                    return None
-                start_time, end_time = timestamps
-                
-                # Find shot type (either "Talking Head" or "B-roll")
-                shot_type = next((p for p in parts if p.strip('"') in ["Talking Head", "B-roll"]), None)
-                if not shot_type:
-                    return None
-                
-                # Find effectiveness rating (a number 1-5)
-                rating = next((p for p in parts if p.strip('"') in ['1', '2', '3', '4', '5']), None)
-                if not rating:
-                    return None
-                
-                # The spoken text is usually the first long text after shot type
-                shot_type_index = next(i for i, p in enumerate(parts) if p.strip('"') in ["Talking Head", "B-roll"])
-                spoken_text = parts[shot_type_index + 1]
-                
-                # Visual description is usually the next substantial text
-                visual_desc_start = shot_type_index + 2
-                visual_desc_parts = []
-                for p in parts[visual_desc_start:]:
-                    if p.strip('"') in ['1', '2', '3', '4', '5']:
-                        break
-                    visual_desc_parts.append(p)
-                visual_description = ' '.join(visual_desc_parts[:2])  # Take first two substantial parts
-                
-                # Inferred purpose is usually before the rating
-                rating_index = next(i for i, p in enumerate(parts) if p.strip('"') in ['1', '2', '3', '4', '5'])
-                inferred_purpose = ' '.join(parts[rating_index-1:rating_index]).strip()
-                
-                # Effectiveness justification is everything after the rating
-                justification = ' '.join(parts[rating_index+1:]).strip()
-                
-                return [
-                    segment_id,
-                    start_time,
-                    end_time,
-                    shot_type.strip('"'),
-                    spoken_text.strip('"'),
-                    visual_description.strip('"'),
-                    inferred_purpose.strip('"'),
-                    rating.strip('"'),
-                    justification.strip('"')
-                ]
-            except Exception as e:
-                print(f"[DEBUG] Failed to extract fields: {str(e)}")
+        def extract_fields_pattern_matching(line):
+            """Fallback method using pattern matching to extract fields."""
+            # Expected pattern: id, start, end, type, text, desc, purpose, rating, justification
+            fields = []
+            
+            # First extract the easy fields (first 4 and rating)
+            parts = line.split(',')
+            if len(parts) < 4:
                 return None
+                
+            # Extract first 4 fields
+            fields.extend([p.strip() for p in parts[:4]])
+            
+            # Find the effectiveness rating (should be a single digit 1-5)
+            rating_idx = None
+            for i, part in enumerate(parts[4:], 4):
+                if part.strip().isdigit() and 1 <= int(part.strip()) <= 5:
+                    rating_idx = i
+                    break
+                    
+            if rating_idx is None:
+                return None
+                
+            # Extract the spoken text (everything between shot type and next quote)
+            spoken_text = ','.join(parts[4:rating_idx]).strip()
+            if spoken_text.startswith('"'):
+                spoken_text = spoken_text[1:]
+            if spoken_text.endswith('"'):
+                spoken_text = spoken_text[:-1]
+            fields.append(spoken_text)
+            
+            # Extract visual description (between spoken text and purpose)
+            desc_start = rating_idx
+            for i in range(rating_idx, len(parts)):
+                if '"purpose"' in parts[i].lower() or '"serves"' in parts[i].lower():
+                    desc_start = i
+                    break
+            visual_desc = ','.join(parts[4:desc_start]).strip()
+            fields.append(visual_desc)
+            
+            # Extract purpose (between desc and rating)
+            purpose = ','.join(parts[desc_start:rating_idx]).strip()
+            fields.append(purpose)
+            
+            # Add rating
+            fields.append(parts[rating_idx].strip())
+            
+            # Extract justification (everything after rating)
+            justification = ','.join(parts[rating_idx+1:]).strip()
+            if justification.startswith('"'):
+                justification = justification[1:]
+            if justification.endswith('"'):
+                justification = justification[:-1]
+            fields.append(justification)
+            
+            return fields if len(fields) == 9 else None
+
+        def fix_csv_line(line):
+            """First attempt with quote-based parsing."""
+            parts = []
+            current_part = []
+            in_quotes = False
+            chars = list(line)
+            
+            i = 0
+            while i < len(chars):
+                char = chars[i]
+                if char == '"':
+                    if i + 1 < len(chars) and chars[i + 1] == '"':  # Handle escaped quotes
+                        current_part.append('""')
+                        i += 2
+                        continue
+                    in_quotes = not in_quotes
+                    current_part.append(char)
+                elif char == ',' and not in_quotes:
+                    parts.append(''.join(current_part))
+                    current_part = []
+                else:
+                    current_part.append(char)
+                i += 1
+            
+            if current_part:
+                parts.append(''.join(current_part))
+            
+            # If we don't have exactly 9 fields, try to fix common issues
+            if len(parts) != 9:
+                # Combine adjacent unquoted fields that were incorrectly split
+                fixed_parts = []
+                i = 0
+                while i < len(parts):
+                    part = parts[i].strip()
+                    # If this part starts with a quote but doesn't end with one,
+                    # keep combining with next parts until we find the closing quote
+                    if part.startswith('"') and not part.endswith('"'):
+                        combined = part
+                        j = i + 1
+                        while j < len(parts):
+                            combined += "," + parts[j]
+                            if parts[j].strip().endswith('"'):
+                                break
+                            j += 1
+                        fixed_parts.append(combined)
+                        i = j + 1
+                    else:
+                        fixed_parts.append(part)
+                        i += 1
+                parts = fixed_parts
+            
+            return parts if len(parts) == 9 else None
 
         analysis_results = []
         for line in normalized_text.strip().split('\n'):
@@ -205,22 +236,27 @@ def analyze_video(video_path, link=None):
                 continue
                 
             try:
-                # Extract fields using pattern matching
-                fields = extract_fields(line)
+                # First try quote-based parsing
+                fields = fix_csv_line(line)
+                
+                # If that fails, try pattern matching
+                if fields is None:
+                    print("[DEBUG] Quote-based parsing failed, trying pattern matching...")
+                    fields = extract_fields_pattern_matching(line)
                 
                 if fields and len(fields) == 9:
                     try:
-                        # Map the fields to VisualSegmentAnalysis attributes
+                        # Map the CSV fields to VisualSegmentAnalysis attributes
                         analysis = VisualSegmentAnalysis(
-                            video_filename=filename,
-                            segment_id=str(fields[0]),
+                            video_filename=filename,  # Add the filename explicitly
+                            segment_id=str(fields[0]),  # Ensure segment_id is string
                             start_time=fields[1],
                             end_time=fields[2],
                             shot_type=fields[3],
                             spoken_text=fields[4],
                             visual_description=fields[5],
                             inferred_purpose=fields[6],
-                            effectiveness_rating=str(fields[7]),
+                            effectiveness_rating=str(fields[7]),  # Keep as string
                             effectiveness_justification=fields[8]
                         )
                         analysis_results.append(analysis)
@@ -229,7 +265,7 @@ def analyze_video(video_path, link=None):
                         print(f"[PARSE ERROR] Exception details: {str(e)}")
                         parse_error = True
                 else:
-                    print(f"[PARSE ERROR] Could not extract valid fields from line: {line}")
+                    print(f"[PARSE ERROR] Could not parse line using either method: {line}")
                     parse_error = True
             except Exception as e:
                 print(f"[PARSE ERROR] Failed to process line: {line}")
