@@ -5,6 +5,7 @@ import csv
 import io
 import google.generativeai as genai
 from dotenv import load_dotenv
+from collections import deque
 from reels_analyzer import VisualSegmentAnalysis, write_analysis_to_csv
 
 load_dotenv()
@@ -142,8 +143,27 @@ def download_and_analyze_reels(links_file):
     with open(links_file, 'r') as f:
         links = [line.strip() for line in f if line.strip()]
 
+    # Rate limiting parameters
+    requests_per_minute = 10
+    time_window = 60  # seconds
+    request_timestamps = deque()
+
     for link in links:
         try:
+            # Enforce rate limit
+            current_time = time.time()
+            while len(request_timestamps) >= requests_per_minute:
+                time_since_oldest_request = current_time - request_timestamps[0]
+                if time_since_oldest_request > time_window:
+                    request_timestamps.popleft()
+                else:
+                    wait_time = time_window - time_since_oldest_request
+                    print(f"Rate limit reached. Waiting for {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                    current_time = time.time()  # Update current time after waiting
+            
+            request_timestamps.append(time.time())
+
             # Get the filename yt-dlp would use
             filename_process = subprocess.run(
                 ['yt-dlp', '--get-filename', '-o', f'{REELS_FOLDER}/%(title)s.%(ext)s', link],
@@ -170,9 +190,6 @@ def download_and_analyze_reels(links_file):
                 print(f"Video {video_filename} already exists, proceeding to analysis.")
             
             analyze_video(video_path)
-
-            print("Waiting for 10 seconds...")
-            time.sleep(10)
 
         except subprocess.CalledProcessError as e:
             print(f"Failed to process {link}. Error: {e}")
