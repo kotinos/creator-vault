@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# venv
+venv/
+
+# Local files
+reels_links.txt
+test_reels_links.txt
+
+# Media files
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.avi 
