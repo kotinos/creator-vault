@@ -26,6 +26,12 @@ This script helps you download Instagram Reels for analysis. The goal is to use 
     pip install -r requirements.txt
     ```
 
+    ```cmd
+    python -m venv venv
+    venv\Scripts\activate
+    python reels_analyzer.py
+    ```
+
 ## Usage
 
 1.  Add the URLs of the Instagram Reels you want to download to the `reels_links.txt` file, with one URL per line.
