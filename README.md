@@ -66,7 +66,22 @@ The script analysis module (`script_reels.py`) provides comprehensive analysis o
 
 ### Script Analysis Output
 
-The script analysis generates a CSV file (`master_script_analysis.csv`) with the following fields:
+The script analysis generates a CSV file (`master_script_analysis.csv`) and comprehensive logs in the `script_analysis_logs/` folder.
+
+### Logging and Raw Data
+
+Each script analysis session creates detailed logs that include:
+- **Source Link**: The original Instagram reel URL
+- **Full Transcript**: Complete video transcript used for analysis  
+- **Raw LLM Output**: Unprocessed AI analysis response before CSV parsing
+- **Parse Status**: Success/failure details for CSV generation
+- **Error Details**: Comprehensive error information if parsing fails
+
+Logs are saved as timestamped files in `script_analysis_logs/script_analysis_YYYYMMDD_HHMMSS.log` and are human-readable for easy review.
+
+### CSV Output Fields
+
+The CSV file contains the following fields:
 - `video_filename`: Name of the analyzed video file
 - `overall_message`: Core message or main takeaway
 - `script_purpose`: Goal the script is trying to achieve
@@ -79,4 +94,4 @@ The script analysis generates a CSV file (`master_script_analysis.csv`) with the
 - `recurring_patterns`: Storytelling patterns and devices
 - `line_by_line_analysis`: Strategic analysis of key lines
 - `effectiveness_score`: Numerical rating (1-10)
-- `improvement_suggestions`: Specific enhancement recommendations   
+- `improvement_suggestions`: Specific enhancement recommendations     

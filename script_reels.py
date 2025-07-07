@@ -3,6 +3,8 @@ import time
 import subprocess
 import csv
 import io
+import logging
+from datetime import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
 from collections import deque
@@ -18,6 +20,51 @@ genai.configure(api_key=api_key)
 
 REELS_FOLDER = "reels"
 TRANSCRIPTS_FOLDER = "transcripts"
+LOGS_FOLDER = "script_analysis_logs"
+
+def setup_logging():
+    """Set up comprehensive logging for script analysis."""
+    if not os.path.exists(LOGS_FOLDER):
+        os.makedirs(LOGS_FOLDER)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"script_analysis_{timestamp}.log"
+    log_path = os.path.join(LOGS_FOLDER, log_filename)
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_path, encoding='utf-8'),
+            logging.StreamHandler()  # Also log to console
+        ]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"=== SCRIPT ANALYSIS SESSION STARTED ===")
+    logger.info(f"Log file: {log_path}")
+    return logger
+
+def log_analysis_details(logger, link, video_filename, transcript, raw_analysis_response):
+    """Log comprehensive details for each video analysis."""
+    logger.info("=" * 80)
+    logger.info(f"ANALYZING VIDEO: {video_filename}")
+    logger.info(f"SOURCE LINK: {link}")
+    logger.info("=" * 80)
+    
+    logger.info("TRANSCRIPT:")
+    logger.info("-" * 40)
+    logger.info(transcript)
+    logger.info("-" * 40)
+    
+    logger.info("RAW LLM ANALYSIS OUTPUT:")
+    logger.info("-" * 40)
+    logger.info(raw_analysis_response)
+    logger.info("-" * 40)
+    
+    logger.info(f"END ANALYSIS FOR: {video_filename}")
+    logger.info("=" * 80)
 SCRIPT_ANALYSIS_PROMPT = """
 **URGENT: STRICTLY ADHERE TO CSV FORMATTING. EACH ROW MUST HAVE EXACTLY 13 FIELDS.**
 
@@ -60,18 +107,25 @@ Generate a single line of CSV output with the following fields, in this exact or
 """
 
 def create_folders():
-    """Creates the reels and transcripts folders if they don't exist."""
+    """Creates the reels, transcripts, and logs folders if they don't exist."""
     if not os.path.exists(REELS_FOLDER):
         os.makedirs(REELS_FOLDER)
     if not os.path.exists(TRANSCRIPTS_FOLDER):
         os.makedirs(TRANSCRIPTS_FOLDER)
+    if not os.path.exists(LOGS_FOLDER):
+        os.makedirs(LOGS_FOLDER)
 
-def analyze_script(video_path, link=None):
+def analyze_script(video_path, link=None, logger=None):
     """
     Analyzes a single video file for script effectiveness and returns analysis results.
     """
     filename = os.path.basename(video_path)
     print(f"Uploading {filename} for script analysis...")
+    if logger:
+        logger.info(f"Starting script analysis for: {filename}")
+        logger.info(f"Video path: {video_path}")
+        if link:
+            logger.info(f"Source link: {link}")
     parse_error = False
     try:
         model = genai.GenerativeModel(model_name="gemini-2.5-flash")
@@ -117,12 +171,17 @@ def analyze_script(video_path, link=None):
             return [], False
 
         print(f"Analyzing script for {filename}...")
+        if logger:
+            logger.info(f"Sending transcript to AI for analysis: {filename}")
         
         analysis_response = model.generate_content([SCRIPT_ANALYSIS_PROMPT, transcript])
 
         print("\n--- Raw Script Analysis CSV from API ---")
         print(analysis_response.text)
         print("--- End of Raw Script Analysis CSV ---\n")
+        
+        if logger:
+            log_analysis_details(logger, link, filename, transcript, analysis_response.text)
 
         # Normalize smart/curly quotes to straight quotes
         normalized_text = analysis_response.text.replace('"', '"').replace('"', '"')
@@ -208,34 +267,53 @@ def analyze_script(video_path, link=None):
                             improvement_suggestions=fields[12]
                         )
                         analysis_results.append(analysis)
+                        if logger:
+                            logger.info(f"Successfully parsed analysis for {filename}")
                     except Exception as e:
                         print(f"[PARSE ERROR] Could not create ScriptAnalysis from fields: {fields}")
                         print(f"[PARSE ERROR] Exception details: {str(e)}")
+                        if logger:
+                            logger.error(f"Failed to create ScriptAnalysis for {filename}: {str(e)}")
+                            logger.error(f"Raw fields: {fields}")
                         parse_error = True
                 else:
                     print(f"[PARSE ERROR] Could not parse line (expected 13 fields, got {len(fields) if fields else 0}): {line}")
+                    if logger:
+                        logger.error(f"Parse error for {filename} - expected 13 fields, got {len(fields) if fields else 0}")
+                        logger.error(f"Problematic line: {line}")
                     parse_error = True
             except Exception as e:
                 print(f"[PARSE ERROR] Failed to process line: {line}")
                 print(f"[PARSE ERROR] Exception details: {str(e)}")
+                if logger:
+                    logger.error(f"Exception processing line for {filename}: {str(e)}")
+                    logger.error(f"Line content: {line}")
                 parse_error = True
         
         print(f"Deleting {filename} from the File API...")
         genai.delete_file(video_file.name)
         print(f"Deleted {filename}.")
+        if logger:
+            logger.info(f"Completed analysis for {filename}. Results: {len(analysis_results)} parsed successfully, Parse errors: {parse_error}")
         return analysis_results, parse_error
 
     except Exception as e:
         print(f"An error occurred during script analysis of {filename}: {e}")
+        if logger:
+            logger.error(f"Critical error during analysis of {filename}: {str(e)}")
         return [], True
 
 def download_and_analyze_script_reels(links_file):
     create_folders()
+    logger = setup_logging()
 
     master_csv_path = "master_script_analysis.csv"
     all_analysis_results = []
     analyzed_videos = set()
     failed_links = []  # Track failed URLs
+    
+    logger.info(f"Starting script analysis session with links file: {links_file}")
+    logger.info(f"Master CSV output: {master_csv_path}")
 
     # Load existing analysis results if the master file exists
     if os.path.exists(master_csv_path):
@@ -275,6 +353,7 @@ def download_and_analyze_script_reels(links_file):
             
             if video_filename in analyzed_videos:
                 print(f"Skipping {video_filename}, already analyzed in master script CSV.")
+                logger.info(f"Skipping already analyzed video: {video_filename}")
                 continue
 
             # Enforce rate limit before processing the video
@@ -295,15 +374,18 @@ def download_and_analyze_script_reels(links_file):
 
             if not os.path.exists(video_path):
                 print(f"Downloading {link}...")
+                logger.info(f"Downloading video from: {link}")
                 subprocess.run(
                     ['yt-dlp', '-o', output_template, link],
                     check=True, timeout=300 # 5-minute timeout for download
                 )
                 print("Download complete.")
+                logger.info(f"Download completed: {video_filename}")
             else:
                 print(f"Video {video_filename} already exists, proceeding to script analysis.")
+                logger.info(f"Using existing video file: {video_filename}")
             
-            new_results, parse_error = analyze_script(video_path, link)
+            new_results, parse_error = analyze_script(video_path, link, logger)
             if new_results:
                 print("\n--- New Script Analysis Results ---")
                 for result in new_results:
@@ -322,21 +404,33 @@ def download_and_analyze_script_reels(links_file):
 
         except subprocess.CalledProcessError as e:
             print(f"Failed to process {link}. Error: {e}")
+            logger.error(f"Subprocess error for {link}: {str(e)}")
             failed_links.append(link)
         except (subprocess.TimeoutExpired, TimeoutError) as e:
             print(f"Timeout occurred while processing {link}: {e}. Skipping.")
+            logger.error(f"Timeout error for {link}: {str(e)}")
             failed_links.append(link)
         except Exception as e:
             print(f"An unexpected error occurred with link {link}: {e}")
+            logger.error(f"Unexpected error for {link}: {str(e)}")
             failed_links.append(link)
 
     # After processing all links, print failed URLs
     if failed_links:
         print("\nThe following URLs failed during script analysis:")
+        logger.info("FAILED LINKS SUMMARY:")
         for url in failed_links:
             print(url)
+            logger.info(f"FAILED: {url}")
     else:
         print("\nAll videos processed successfully for script analysis!")
+        logger.info("All videos processed successfully!")
+    
+    logger.info(f"=== SCRIPT ANALYSIS SESSION COMPLETED ===")
+    logger.info(f"Total videos processed: {len(all_analysis_results)}")
+    logger.info(f"Failed links: {len(failed_links)}")
+    logger.info(f"Master CSV: {master_csv_path}")
+    logger.info(f"Logs saved in: {LOGS_FOLDER}")
 
 if __name__ == "__main__":
     download_and_analyze_script_reels("reels_links.txt")
