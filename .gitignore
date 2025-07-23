@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.log
 
 # venv
 venv/
@@ -17,6 +18,7 @@ test_reels_links.txt
 *.webm
 *.mov
 *.avi
+*.csv
 
 # Secrets
 .env
