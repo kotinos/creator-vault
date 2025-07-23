@@ -6,6 +6,7 @@ import io
 import google.generativeai as genai
 from dotenv import load_dotenv
 from collections import deque
+from datetime import datetime
 from reels_analyzer import VisualSegmentAnalysis, write_analysis_to_csv
 
 load_dotenv()
@@ -47,6 +48,29 @@ For each distinct visual segment (whether talking head or B-roll), generate a si
 **Example of a CORRECTLY QUOTED field (note the straight quotes and doubled internal quote):**
 `"The woman said, ""Hello!"" and smiled warmly."`
 """
+
+def log_analysis_details(link, video_filename, transcript, raw_llm_output):
+    """
+    Logs comprehensive analysis details including link, filename, transcript, and raw LLM output.
+    This ensures all data is captured even if CSV parsing fails.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+    transcript_length = len(transcript) if transcript else 0
+    
+    print("\n" + "="*60)
+    print("=== LLM ANALYSIS LOG ===")
+    print(f"Timestamp: {timestamp}")
+    print(f"Link URL: {link}")
+    print(f"Video Filename: {video_filename}")
+    print(f"Transcript Length: {transcript_length} characters")
+    print()
+    print("--- TRANSCRIPT ---")
+    print(transcript if transcript else "(No transcript available)")
+    print()
+    print("--- RAW LLM ANALYSIS OUTPUT ---")
+    print(raw_llm_output if raw_llm_output else "(No LLM output available)")
+    print("=== END ANALYSIS LOG ===")
+    print("="*60 + "\n")
 
 def create_folders():
     """Creates the reels and transcripts folders if they don't exist."""
@@ -110,9 +134,7 @@ def analyze_video(video_path, link=None):
         # Step 2: Analyze the video with the transcript
         analysis_response = model.generate_content([ANALYSIS_PROMPT, transcript, video_file])
 
-        print("\n--- Raw Analysis CSV from API ---")
-        print(analysis_response.text)
-        print("--- End of Raw Analysis CSV ---\n")
+        log_analysis_details(link, filename, transcript, analysis_response.text)
 
         # Normalize smart/curly quotes to straight quotes
         normalized_text = analysis_response.text.replace('"', '"').replace('"', '"')
@@ -263,13 +285,16 @@ def analyze_video(video_path, link=None):
                     except Exception as e:
                         print(f"[PARSE ERROR] Could not create VisualSegmentAnalysis from fields: {fields}")
                         print(f"[PARSE ERROR] Exception details: {str(e)}")
+                        print(f"[PARSE ERROR] Raw data preserved in analysis log above for manual review")
                         parse_error = True
                 else:
                     print(f"[PARSE ERROR] Could not parse line using either method: {line}")
+                    print(f"[PARSE ERROR] Raw data preserved in analysis log above for manual review")
                     parse_error = True
             except Exception as e:
                 print(f"[PARSE ERROR] Failed to process line: {line}")
                 print(f"[PARSE ERROR] Exception details: {str(e)}")
+                print(f"[PARSE ERROR] Raw data preserved in analysis log above for manual review")
                 parse_error = True
         print(f"Deleting {filename} from the File API...")
         genai.delete_file(video_file.name)
@@ -365,12 +390,15 @@ def download_and_analyze_reels(links_file):
                 
                 if parse_error:
                     print(f"WARNING: Skipping CSV write for {video_filename} due to parse errors")
+                    print(f"WARNING: Raw analysis data has been logged above for manual review")
                     failed_links.append(link)
                 else:
                     all_analysis_results.extend(new_results)
                     print(f"DEBUG: About to append {len(new_results)} results for {video_filename} to CSV")
                     write_analysis_to_csv(new_results, master_csv_path)
             elif parse_error:
+                print(f"WARNING: No analysis results generated for {video_filename} due to parse errors")
+                print(f"WARNING: Raw analysis data has been logged above for manual review")
                 failed_links.append(link)
 
         except subprocess.CalledProcessError as e:
